@@ -31,7 +31,6 @@ import {
   listServices,
 } from '@/db/repositories';
 import {
-  DEMO_TODAY,
   addMonths,
   formatMonthYear,
   formatRuDate,
@@ -51,7 +50,7 @@ interface Metrics {
 
 export function StatisticsPage() {
   const { toast } = useToast();
-  const [month, setMonth] = useState<Date>(startOfMonth(DEMO_TODAY));
+  const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [specialistId, setSpecialistId] = useState('all');
   const [serviceId, setServiceId] = useState('all');
 

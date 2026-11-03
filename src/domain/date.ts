@@ -15,9 +15,7 @@ import {
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
-/** Демо-дата, по которой свёрстаны макеты. */
-export const DEMO_TODAY = new Date(2026, 5, 18);
-
+/** Начало недели в календаре. */
 export const WEEK_STARTS_ON = 1 as const;
 
 export const WEEKDAY_NAMES = [

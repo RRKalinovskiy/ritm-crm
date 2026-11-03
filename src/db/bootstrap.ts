@@ -1,15 +1,14 @@
-import { seedDemoData } from '@/db/seed';
-
-export const EMPTY_START_FLAG = 'ritm-empty-start';
+import { db } from '@/db/db';
 
 let initPromise: Promise<void> | null = null;
 
+/**
+ * Готовит локальную базу к работе. Демо-данные больше не загружаются:
+ * при пустой базе приложение открывает мастер первого запуска.
+ */
 export function initDatabase(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
-      if (window.localStorage.getItem(EMPTY_START_FLAG) !== '1') {
-        await seedDemoData();
-      }
       try {
         await navigator.storage?.persist?.();
       } catch {
@@ -18,4 +17,9 @@ export function initDatabase(): Promise<void> {
     })();
   }
   return initPromise;
+}
+
+/** Мастер настройки нужен, пока в базе нет ни одной записи настроек. */
+export async function needsOnboarding(): Promise<boolean> {
+  return (await db.settings.count()) === 0;
 }

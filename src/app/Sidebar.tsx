@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { getDaySummary, getSettings } from '@/db/repositories';
-import { DEMO_TODAY, toDateKey } from '@/domain/date';
+import { toDateKey } from '@/domain/date';
 import { Avatar } from '@/components/ui/Avatar';
 import { cn } from '@/lib/utils';
 
@@ -24,10 +24,8 @@ interface NavItem {
 
 export function Sidebar() {
   const settings = useLiveQuery(() => getSettings(), []);
-  const todaySummary = useLiveQuery(
-    () => getDaySummary(toDateKey(DEMO_TODAY)),
-    [],
-  );
+  const todayKey = toDateKey(new Date());
+  const todaySummary = useLiveQuery(() => getDaySummary(todayKey), [todayKey]);
 
   const items: NavItem[] = [
     { to: '/schedule', label: 'Расписание', icon: CalendarDays, badge: todaySummary?.count },
@@ -56,10 +54,10 @@ export function Sidebar() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[12px] font-bold text-ink">
-              {settings?.studioName ?? 'Студия «Форма»'}
+              {settings?.studioName ?? 'Моя студия'}
             </div>
             <div className="truncate text-[10px] text-muted">
-              {settings?.address ?? 'Москва, ул. Лесная, 12'}
+              {settings?.address ?? 'Адрес не указан'}
             </div>
           </div>
           <ChevronDown size={14} className="shrink-0 text-muted" />
@@ -99,10 +97,10 @@ export function Sidebar() {
 
         <div className="rounded-xl border border-line p-2.5">
           <div className="flex items-center gap-2.5">
-            <Avatar name="Елена Кузнецова" color="#376451" size="md" />
+            <Avatar name="Администратор" color="#376451" size="md" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[12px] font-bold text-ink">Елена Кузнецова</div>
-              <div className="truncate text-[10px] text-muted">Администратор</div>
+              <div className="truncate text-[12px] font-bold text-ink">Администратор</div>
+              <div className="truncate text-[10px] text-muted">Локальный профиль</div>
             </div>
             <ChevronDown size={14} className="text-muted" />
           </div>

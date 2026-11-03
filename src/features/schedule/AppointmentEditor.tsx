@@ -23,7 +23,9 @@ import {
   listClients,
   listServices,
   saveAppointment,
+  saveCategory,
   saveClient,
+  saveService,
 } from '@/db/repositories';
 import type {
   Appointment,
@@ -36,7 +38,6 @@ import type {
 } from '@/domain/types';
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_ORDER } from '@/domain/types';
 import {
-  DEMO_TODAY,
   addMinutesToTime,
   formatDuration,
   formatTimeRange,
@@ -46,6 +47,7 @@ import {
 } from '@/domain/date';
 import { formatPhone, formatRub, normalizePhone } from '@/domain/money';
 import { cn } from '@/lib/utils';
+import { SERVICE_DURATIONS, formatServiceDuration } from '@/features/services/durations';
 
 interface AppointmentEditorProps {
   open: boolean;
@@ -62,7 +64,7 @@ interface AppointmentEditorProps {
 const EMPTY_FORM = {
   clientId: '',
   specialistId: '',
-  date: toDateKey(DEMO_TODAY),
+  date: toDateKey(new Date()),
   startTime: '10:00',
   status: 'pending' as AppointmentStatus,
   comment: '',
@@ -99,6 +101,15 @@ export function AppointmentEditor({
   const [quickError, setQuickError] = useState('');
   const [quickSaving, setQuickSaving] = useState(false);
 
+  const [quickServiceOpen, setQuickServiceOpen] = useState(false);
+  const [quickServiceName, setQuickServiceName] = useState('');
+  const [quickServiceCategoryId, setQuickServiceCategoryId] = useState('');
+  const [quickServiceNewCategory, setQuickServiceNewCategory] = useState('');
+  const [quickServicePrice, setQuickServicePrice] = useState('');
+  const [quickServiceDuration, setQuickServiceDuration] = useState(60);
+  const [quickServiceError, setQuickServiceError] = useState('');
+  const [quickServiceSaving, setQuickServiceSaving] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -129,6 +140,13 @@ export function AppointmentEditor({
       setQuickName('');
       setQuickPhone('');
       setQuickError('');
+      setQuickServiceOpen(false);
+      setQuickServiceName('');
+      setQuickServiceCategoryId(nextCategories[0]?.id ?? 'new');
+      setQuickServiceNewCategory('');
+      setQuickServicePrice('');
+      setQuickServiceDuration(60);
+      setQuickServiceError('');
 
       if (details) {
         setExisting(details);
@@ -159,7 +177,7 @@ export function AppointmentEditor({
         setServicePickerOpen(true);
         setForm({
           ...EMPTY_FORM,
-          date: defaults?.date ?? toDateKey(DEMO_TODAY),
+          date: defaults?.date ?? toDateKey(new Date()),
           startTime: defaults?.startTime ?? '10:00',
           specialistId: defaults?.specialistId ?? nextSpecialists[0]?.id ?? '',
           status: 'pending',
@@ -237,7 +255,9 @@ export function AppointmentEditor({
         return (
           name.includes(query) ||
           (digits.length > 0 && client.phoneNormalized.includes(digits)) ||
-          (client.email ?? '').toLowerCase().includes(query)
+          (client.email ?? '').toLowerCase().includes(query) ||
+          (client.comment ?? '').toLowerCase().includes(query) ||
+          (client.notes ?? '').toLowerCase().includes(query)
         );
       })
       .slice(0, 8);
@@ -259,6 +279,13 @@ export function AppointmentEditor({
       }))
       .filter((group) => group.items.length > 0);
   }, [services, categories, serviceQuery]);
+
+  const effectiveQuickServiceCategoryId =
+    quickServiceCategoryId === 'new'
+      ? 'new'
+      : categories.some((category) => category.id === quickServiceCategoryId)
+        ? quickServiceCategoryId
+        : categories[0]?.id ?? 'new';
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -336,6 +363,122 @@ export function AppointmentEditor({
       setQuickError(cause instanceof Error ? cause.message : 'Не удалось добавить клиента');
     } finally {
       setQuickSaving(false);
+    }
+  }
+
+  function openQuickService() {
+    setQuickServiceOpen(true);
+    setServicePickerOpen(true);
+    setQuickServiceError('');
+    setQuickServiceCategoryId((current) =>
+      categories.some((category) => category.id === current)
+        ? current
+        : categories[0]?.id ?? 'new',
+    );
+  }
+
+  async function createQuickService() {
+    const name = quickServiceName.trim();
+    const price = Number(quickServicePrice);
+    const existingCategory = categories.find(
+      (category) => category.id === effectiveQuickServiceCategoryId,
+    );
+
+    if (!name) {
+      setQuickServiceError('Укажите название услуги');
+      return;
+    }
+    if (!existingCategory && !quickServiceNewCategory.trim()) {
+      setQuickServiceError('Укажите название новой категории');
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      setQuickServiceError('Укажите цену больше нуля');
+      return;
+    }
+
+    setQuickServiceSaving(true);
+    try {
+      let categoryId = existingCategory?.id;
+      if (!categoryId) {
+        const categoryName = quickServiceNewCategory.trim();
+        categoryId = await saveCategory({ name: categoryName });
+        setCategories((current) => [
+          ...current,
+          { id: categoryId as string, name: categoryName, order: current.length + 1 },
+        ]);
+      }
+
+      const roundedPrice = Math.round(price);
+      const specialistIds = specialists.map((specialist) => specialist.id);
+      const id = await saveService({
+        categoryId,
+        name,
+        durationMin: quickServiceDuration,
+        priceRub: roundedPrice,
+        specialistIds,
+        active: true,
+      });
+      const now = new Date().toISOString();
+      const service: Service = {
+        id,
+        categoryId,
+        name,
+        durationMin: quickServiceDuration,
+        priceRub: roundedPrice,
+        specialistIds,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setServices((current) =>
+        [...current, service].sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+      );
+      setSpecialists((current) =>
+        current.map((specialist) =>
+          specialist.serviceIds.includes(id)
+            ? specialist
+            : { ...specialist, serviceIds: [...specialist.serviceIds, id] },
+        ),
+      );
+      setSelected((current) =>
+        current.some((line) => line.serviceId === id)
+          ? current
+          : [
+              ...current,
+              {
+                serviceId: id,
+                nameSnapshot: name,
+                priceRub: roundedPrice,
+                durationMin: quickServiceDuration,
+              },
+            ],
+      );
+      setServiceQuery('');
+      setServicePickerOpen(false);
+      setQuickServiceOpen(false);
+      setQuickServiceName('');
+      setQuickServiceNewCategory('');
+      setQuickServicePrice('');
+      setQuickServiceDuration(60);
+      setQuickServiceError('');
+      setErrors((current) => {
+        if (!current.services) return current;
+        const next = { ...current };
+        delete next.services;
+        return next;
+      });
+      toast({
+        title: 'Услуга создана и добавлена в запись',
+        description: `${name} · ${formatRub(roundedPrice)}`,
+      });
+    } catch (cause) {
+      setQuickServiceError(
+        cause instanceof Error ? cause.message : 'Не удалось создать услугу',
+      );
+    } finally {
+      setQuickServiceSaving(false);
     }
   }
 
@@ -752,6 +895,110 @@ export function AppointmentEditor({
                   </div>
                 )}
               </div>
+            )}
+
+            {quickServiceOpen ? (
+              <div className="border-t border-line bg-primary-faint p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-bold text-ink">Новая услуга</div>
+                    <div className="mt-0.5 text-[10px] text-muted">
+                      Добавится в прайс и сразу в текущую запись
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuickServiceOpen(false)}
+                    disabled={quickServiceSaving}
+                    className="rounded-md p-1 text-muted transition hover:bg-white hover:text-ink"
+                    aria-label="Закрыть создание услуги"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Input
+                    value={quickServiceName}
+                    onChange={(event) => setQuickServiceName(event.target.value)}
+                    placeholder="Название услуги"
+                    aria-label="Название новой услуги"
+                    autoFocus
+                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_110px_145px] gap-2">
+                    <Select
+                      value={effectiveQuickServiceCategoryId}
+                      onChange={(event) => setQuickServiceCategoryId(event.target.value)}
+                      aria-label="Категория новой услуги"
+                    >
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                      <option value="new">+ Новая категория</option>
+                    </Select>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        step={50}
+                        value={quickServicePrice}
+                        onChange={(event) => setQuickServicePrice(event.target.value)}
+                        placeholder="Цена"
+                        aria-label="Цена новой услуги"
+                        className="pr-7"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted">
+                        ₽
+                      </span>
+                    </div>
+                    <Select
+                      value={quickServiceDuration}
+                      onChange={(event) => setQuickServiceDuration(Number(event.target.value))}
+                      aria-label="Длительность новой услуги"
+                    >
+                      {SERVICE_DURATIONS.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {formatServiceDuration(minutes)}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  {effectiveQuickServiceCategoryId === 'new' && (
+                    <Input
+                      value={quickServiceNewCategory}
+                      onChange={(event) => setQuickServiceNewCategory(event.target.value)}
+                      placeholder="Название новой категории"
+                      aria-label="Название новой категории"
+                    />
+                  )}
+                  {quickServiceError && (
+                    <div className="text-[11px] font-medium text-danger">{quickServiceError}</div>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setQuickServiceOpen(false)}
+                      disabled={quickServiceSaving}
+                    >
+                      Отмена
+                    </Button>
+                    <Button size="sm" onClick={createQuickService} disabled={quickServiceSaving}>
+                      {quickServiceSaving ? 'Создаём…' : 'Создать и выбрать'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={openQuickService}
+                className="flex w-full items-center justify-center gap-1.5 border-t border-line px-3 py-2.5 text-[10px] font-semibold text-primary transition hover:bg-primary-faint"
+              >
+                <Plus size={12} />
+                Создать услугу, если её нет в прайсе
+              </button>
             )}
 
             <div className="flex items-center justify-between border-t border-line bg-[#FBFCFB] px-3 py-2.5">

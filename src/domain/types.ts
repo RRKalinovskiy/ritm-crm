@@ -29,7 +29,6 @@ export interface Settings {
   workdayStart: string;
   workdayEnd: string;
   weekStart: 'monday';
-  demoMode: boolean;
   lastBackupAt?: string;
 }
 
@@ -70,6 +69,7 @@ export interface Client {
   phoneNormalized: string;
   email?: string;
   birthday?: string;
+  comment?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;

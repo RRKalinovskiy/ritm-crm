@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '@/app/AppLayout';
-import { initDatabase } from '@/db/bootstrap';
+import { initDatabase, needsOnboarding } from '@/db/bootstrap';
+import { FirstRunSetup } from '@/features/onboarding/FirstRunSetup';
 import { SchedulePage } from '@/pages/SchedulePage';
 import { ServicesPage } from '@/pages/ServicesPage';
 import { ClientsPage } from '@/pages/ClientsPage';
 import { StatisticsPage } from '@/pages/StatisticsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 
-type Phase = 'loading' | 'ready' | 'error';
+type Phase = 'loading' | 'setup' | 'ready' | 'error';
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -17,8 +18,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     initDatabase()
-      .then(() => {
-        if (!cancelled) setPhase('ready');
+      .then(async () => {
+        const setupRequired = await needsOnboarding();
+        if (!cancelled) setPhase(setupRequired ? 'setup' : 'ready');
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
@@ -65,6 +67,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (phase === 'setup') {
+    return <FirstRunSetup onComplete={() => setPhase('ready')} />;
   }
 
   return (

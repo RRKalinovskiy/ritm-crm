@@ -22,6 +22,95 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await db.settings.put(settings);
 }
 
+export interface OnboardingInput {
+  studioName: string;
+  address: string;
+  phone: string;
+  workdayStart: string;
+  workdayEnd: string;
+  specialists: Array<{ name: string; role: string; color: string }>;
+  categories: Array<{ name: string }>;
+  services: Array<{
+    name: string;
+    categoryIndex: number;
+    priceRub: number;
+    durationMin: number;
+  }>;
+}
+
+/**
+ * Сохраняет результат мастера первого запуска одной транзакцией.
+ * Услуги автоматически становятся доступны всем добавленным специалистам.
+ */
+export async function completeOnboarding(input: OnboardingInput): Promise<void> {
+  const now = nowIso();
+  const specialists = input.specialists
+    .map((specialist) => ({
+      id: uid('sp'),
+      name: specialist.name.trim(),
+      role: specialist.role.trim() || 'Мастер',
+      color: specialist.color,
+      active: true,
+      serviceIds: [] as string[],
+    }))
+    .filter((specialist) => specialist.name.length > 0);
+
+  if (specialists.length === 0) {
+    throw new Error('Добавьте хотя бы одного специалиста');
+  }
+
+  const categories = input.categories
+    .map((category) => category.name.trim())
+    .filter((name) => name.length > 0)
+    .map((name, index) => ({ id: uid('cat'), name, order: index + 1 }));
+
+  const services = input.services.map((service) => {
+    const category = categories[service.categoryIndex];
+    if (!category) {
+      throw new Error(`Выберите категорию для услуги «${service.name.trim()}»`);
+    }
+    if (!service.name.trim() || service.priceRub <= 0 || service.durationMin <= 0) {
+      throw new Error('Проверьте название, цену и длительность услуг');
+    }
+    return {
+      id: uid('svc'),
+      categoryId: category.id,
+      name: service.name.trim(),
+      durationMin: service.durationMin,
+      priceRub: Math.round(service.priceRub),
+      specialistIds: specialists.map((specialist) => specialist.id),
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
+  const serviceIds = services.map((service) => service.id);
+  const specialistRows = specialists.map((specialist) => ({
+    ...specialist,
+    serviceIds,
+  }));
+
+  await db.transaction(
+    'rw',
+    [db.settings, db.specialists, db.categories, db.services],
+    async () => {
+      await db.settings.put({
+        id: 'app',
+        studioName: input.studioName.trim(),
+        address: input.address.trim(),
+        phone: input.phone.trim(),
+        workdayStart: input.workdayStart,
+        workdayEnd: input.workdayEnd,
+        weekStart: 'monday',
+      });
+      await db.categories.bulkPut(categories);
+      await db.specialists.bulkPut(specialistRows);
+      await db.services.bulkPut(services);
+    },
+  );
+}
+
 export async function listSpecialists(): Promise<Specialist[]> {
   return db.specialists.orderBy('name').toArray();
 }
@@ -256,7 +345,9 @@ export async function searchClients(query: string, limit = 8): Promise<Client[]>
       return (
         name.includes(normalized) ||
         client.phoneNormalized.includes(digits) ||
-        (client.email ?? '').toLowerCase().includes(normalized)
+        (client.email ?? '').toLowerCase().includes(normalized) ||
+        (client.comment ?? '').toLowerCase().includes(normalized) ||
+        (client.notes ?? '').toLowerCase().includes(normalized)
       );
     })
     .slice(0, limit);

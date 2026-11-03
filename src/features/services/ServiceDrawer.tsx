@@ -13,6 +13,7 @@ import {
 import type { Category, Service, Specialist } from '@/domain/types';
 import { formatRub } from '@/domain/money';
 import { cn } from '@/lib/utils';
+import { SERVICE_DURATIONS, formatServiceDuration } from '@/features/services/durations';
 
 interface ServiceDrawerProps {
   open: boolean;
@@ -20,8 +21,6 @@ interface ServiceDrawerProps {
   service?: Service | null;
   onSaved?: () => void;
 }
-
-const DURATIONS = [15, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240];
 
 interface FormState {
   name: string;
@@ -222,9 +221,9 @@ export function ServiceDrawer({ open, onOpenChange, service, onSaved }: ServiceD
               value={duration}
               onChange={(event) => update('durationMin', Number(event.target.value))}
             >
-              {DURATIONS.map((minutes) => (
+              {SERVICE_DURATIONS.map((minutes) => (
                 <option key={minutes} value={minutes}>
-                  {minutes < 60 ? `${minutes} минут` : minutes === 60 ? '1 час' : `${Math.floor(minutes / 60)} ч${minutes % 60 ? ` ${minutes % 60} мин` : ''}`}
+                  {formatServiceDuration(minutes)}
                 </option>
               ))}
             </Select>

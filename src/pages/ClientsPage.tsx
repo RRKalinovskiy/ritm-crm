@@ -46,7 +46,10 @@ export function ClientsPage() {
       return (
         name.includes(normalized) ||
         (digits.length > 0 && client.phoneNormalized.includes(digits)) ||
-        (client.email ?? '').toLowerCase().includes(normalized)
+        (client.email ?? '').toLowerCase().includes(normalized) ||
+        (client.phone ?? '').toLowerCase().includes(normalized) ||
+        (client.comment ?? '').toLowerCase().includes(normalized) ||
+        (client.notes ?? '').toLowerCase().includes(normalized)
       );
     });
     return result.sort((a, b) => {
@@ -75,7 +78,7 @@ export function ClientsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Клиенты"
-        subtitle="Контакты, история визитов и заметки — всё хранится на этом устройстве"
+        subtitle="Контакты, история визитов и комментарии — всё хранится на этом устройстве"
         actions={
           <Button onClick={openCreate}>
             <UserPlus size={16} />
@@ -115,7 +118,7 @@ export function ClientsPage() {
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Имя, телефон или email"
+                placeholder="Имя, телефон, email или комментарий"
                 className="h-9 pl-9"
                 aria-label="Поиск клиентов"
               />
@@ -168,7 +171,7 @@ export function ClientsPage() {
                           {client.firstName} {client.lastName}
                         </div>
                         <div className="mt-0.5 truncate text-[11px] text-muted">
-                          {client.email ?? client.notes ?? 'Без дополнительных контактов'}
+                          {client.comment ?? client.notes ?? client.email ?? 'Без дополнительных контактов'}
                         </div>
                       </div>
                     </div>

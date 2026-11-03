@@ -11,7 +11,6 @@ import {
   Info,
   Pencil,
   Plus,
-  RotateCcw,
   Save,
   ShieldCheck,
   Store,
@@ -41,7 +40,6 @@ import {
   saveSettings,
   setSpecialistActive,
 } from '@/db/repositories';
-import { EMPTY_START_FLAG } from '@/db/bootstrap';
 import type { Category, Settings, Specialist } from '@/domain/types';
 import { formatRuDate } from '@/domain/date';
 import { formatRub, pluralize } from '@/domain/money';
@@ -76,13 +74,6 @@ export function SettingsPage() {
       <PageHeader
         title="Настройки"
         subtitle="Студия, команда, прайс и сохранность данных"
-        actions={
-          settings?.demoMode ? (
-            <Badge tone="warning" dot>
-              Демо-данные
-            </Badge>
-          ) : undefined
-        }
       />
 
       <div className="flex flex-wrap items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-sm">
@@ -197,7 +188,7 @@ function StudioSettings({ settings }: { settings: Settings | undefined }) {
               id="settings-studio-name"
               value={form.studioName}
               onChange={(event) => update('studioName', event.target.value)}
-              placeholder="Студия «Форма»"
+              placeholder="Название студии"
             />
           </Field>
           <Field label="Адрес" htmlFor="settings-address">
@@ -205,7 +196,7 @@ function StudioSettings({ settings }: { settings: Settings | undefined }) {
               id="settings-address"
               value={form.address}
               onChange={(event) => update('address', event.target.value)}
-              placeholder="Москва, ул. Лесная, 12"
+              placeholder="Город, улица, дом"
             />
           </Field>
           <Field label="Телефон" htmlFor="settings-phone">
@@ -605,28 +596,10 @@ function DataSettings({ settings }: { settings: Settings | undefined }) {
     }
   }
 
-  async function resetDemo() {
-    if (!window.confirm('Сбросить все данные и загрузить демо-набор заново?')) return;
-    setBusy(true);
-    try {
-      window.localStorage.removeItem(EMPTY_START_FLAG);
-      await clearAllData();
-      window.location.reload();
-    } catch (cause) {
-      toast({
-        title: 'Не удалось сбросить данные',
-        description: cause instanceof Error ? cause.message : undefined,
-        tone: 'error',
-      });
-      setBusy(false);
-    }
-  }
-
   async function clearEverything() {
-    if (!window.confirm('Удалить все данные и начать с пустой базы? Это действие нельзя отменить.')) return;
+    if (!window.confirm('Удалить все данные и вернуться к мастеру настройки? Это действие нельзя отменить.')) return;
     setBusy(true);
     try {
-      window.localStorage.setItem(EMPTY_START_FLAG, '1');
       await clearAllData();
       window.location.reload();
     } catch (cause) {
@@ -689,13 +662,10 @@ function DataSettings({ settings }: { settings: Settings | undefined }) {
             Опасная зона
           </div>
           <p className="mt-1.5 text-[11px] leading-5 text-muted">
-            Сброс вернёт демонстрационные данные июня 2026. Полная очистка оставит пустую базу.
+            Полная очистка удалит студию, специалистов, услуги, клиентов и записи.
+            После перезагрузки снова откроется мастер настройки.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={resetDemo} disabled={busy}>
-              <RotateCcw size={14} />
-              Сбросить демо-данные
-            </Button>
             <Button variant="danger" size="sm" onClick={clearEverything} disabled={busy}>
               <Trash2 size={14} />
               Очистить всё

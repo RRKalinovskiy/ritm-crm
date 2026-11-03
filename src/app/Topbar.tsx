@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, ChevronRight, CloudOff } from 'lucide-react';
-import { DEMO_TODAY, formatRuDateLong } from '@/domain/date';
+import { formatRuDateLong } from '@/domain/date';
 
 const TITLES: Array<{ match: RegExp; title: string; href: string }> = [
   { match: /^\/schedule/, title: 'Расписание', href: '/schedule' },
@@ -26,7 +26,7 @@ export function Topbar() {  const location = useLocation();
 
       <div className="flex items-center gap-3">
         <span className="hidden text-[11px] text-muted xl:block">
-          {capitalize(formatRuDateLong(DEMO_TODAY))}
+          {capitalize(formatRuDateLong(new Date()))}
         </span>
         <span className="hidden h-5 w-px bg-line xl:block" />
         <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-primary-soft px-2.5 text-[10px] font-semibold text-primary-dark">

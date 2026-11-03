@@ -24,6 +24,7 @@ interface FormState {
   phone: string;
   email: string;
   birthday: string;
+  comment: string;
   notes: string;
 }
 
@@ -33,6 +34,7 @@ const EMPTY: FormState = {
   phone: '',
   email: '',
   birthday: '',
+  comment: '',
   notes: '',
 };
 
@@ -53,6 +55,7 @@ export function ClientDrawer({ open, onOpenChange, client, onSaved }: ClientDraw
         phone: client.phone,
         email: client.email ?? '',
         birthday: client.birthday ?? '',
+        comment: client.comment ?? '',
         notes: client.notes ?? '',
       });
       setShowHistory(false);
@@ -100,6 +103,7 @@ export function ClientDrawer({ open, onOpenChange, client, onSaved }: ClientDraw
         phone: form.phone.trim(),
         email: form.email.trim() || undefined,
         birthday: form.birthday || undefined,
+        comment: form.comment.trim() || undefined,
         notes: form.notes.trim() || undefined,
       });
       toast({
@@ -124,7 +128,7 @@ export function ClientDrawer({ open, onOpenChange, client, onSaved }: ClientDraw
       open={open}
       onOpenChange={onOpenChange}
       title={client ? 'Карточка клиента' : 'Новый клиент'}
-      description={client ? 'Контакты, заметки и история визитов' : 'Добавьте контакт клиента в локальную базу'}
+      description={client ? 'Контакты, комментарий, заметки и история визитов' : 'Добавьте контакт клиента в локальную базу'}
       width="520px"
       footer={
         <>
@@ -186,6 +190,19 @@ export function ClientDrawer({ open, onOpenChange, client, onSaved }: ClientDraw
             />
           </Field>
         </div>
+
+        <Field
+          label="Комментарий"
+          hint="Короткая заметка о клиенте: договорённости, удобный способ связи, важные детали."
+          htmlFor="client-comment"
+        >
+          <Textarea
+            id="client-comment"
+            value={form.comment}
+            placeholder="Например: постоянная клиентка, удобнее писать в мессенджер"
+            onChange={(event) => update('comment', event.target.value)}
+          />
+        </Field>
 
         <Field label="Заметки" hint="Предпочтения, аллергии, особенности — всё, что важно помнить." htmlFor="client-notes">
           <Textarea

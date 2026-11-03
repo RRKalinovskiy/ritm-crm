@@ -20,7 +20,6 @@ import {
   listActiveSpecialists,
 } from '@/db/repositories';
 import {
-  DEMO_TODAY,
   MONTH_NAMES_PREPOSITIONAL,
   addDays,
   addMonths,
@@ -44,7 +43,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 
 export function SchedulePage() {
   const [view, setView] = useState<ViewMode>('day');
-  const [cursor, setCursor] = useState<Date>(DEMO_TODAY);
+  const [cursor, setCursor] = useState<Date>(new Date());
   const [specialistFilter, setSpecialistFilter] = useState<string>('all');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -101,7 +100,7 @@ export function SchedulePage() {
     [filtered],
   );
 
-  const calendarToday = settings?.demoMode === false ? new Date() : DEMO_TODAY;
+  const calendarToday = new Date();
 
   const summary = useMemo(() => {
     if (view === 'day') {
@@ -229,7 +228,7 @@ export function SchedulePage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setCursor(DEMO_TODAY)}
+            onClick={() => setCursor(new Date())}
             className="inline-flex h-9 items-center rounded-xl border border-line bg-surface px-3.5 text-[11px] font-semibold text-ink shadow-sm transition hover:bg-[#F8FAF8]"
           >
             Сегодня
