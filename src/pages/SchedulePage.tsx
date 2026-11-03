@@ -4,30 +4,41 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  MousePointer2,
   Plus,
   SlidersHorizontal,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
+import { useToast } from '@/components/ui/Toast';
 import { AppointmentEditor } from '@/features/schedule/AppointmentEditor';
+import { AppointmentContextMenu } from '@/features/schedule/AppointmentContextMenu';
 import { DayView } from '@/features/schedule/DayView';
 import { MonthView } from '@/features/schedule/MonthView';
 import { YearView } from '@/features/schedule/YearView';
 import {
+  deleteAppointment,
   getAppointmentsForRange,
   getSettings,
   listActiveSpecialists,
+  updateAppointmentStatus,
+  updateAppointmentTiming,
 } from '@/db/repositories';
+import type { AppointmentStatus, AppointmentWithDetails } from '@/domain/types';
+import { APPOINTMENT_STATUS_LABELS } from '@/domain/types';
 import {
   MONTH_NAMES_PREPOSITIONAL,
   addDays,
   addMonths,
   addYears,
+  formatDuration,
   formatMonthYear,
   formatRuDate,
   getMonthGrid,
   isSameMonth,
+  minutesFromTime,
+  timeFromMinutes,
   toDateKey,
 } from '@/domain/date';
 import { formatRub, pluralize } from '@/domain/money';
@@ -42,11 +53,18 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 };
 
 export function SchedulePage() {
+  const { toast } = useToast();
   const [view, setView] = useState<ViewMode>('day');
   const [cursor, setCursor] = useState<Date>(new Date());
   const [specialistFilter, setSpecialistFilter] = useState<string>('all');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [copySource, setCopySource] = useState<AppointmentWithDetails | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    appointment: AppointmentWithDetails;
+    x: number;
+    y: number;
+  } | null>(null);
   const [defaults, setDefaults] = useState<{
     date?: string;
     startTime?: string;
@@ -165,6 +183,7 @@ export function SchedulePage() {
 
   function openCreate(options?: { dateKey?: string; startTime?: string; specialistId?: string }) {
     setEditingId(null);
+    setCopySource(null);
     setDefaults({
       date: options?.dateKey ?? dayKey,
       startTime: options?.startTime ?? settings?.workdayStart ?? '09:00',
@@ -177,8 +196,168 @@ export function SchedulePage() {
 
   function openAppointment(appointmentId: string) {
     setEditingId(appointmentId);
+    setCopySource(null);
     setDefaults({});
     setEditorOpen(true);
+  }
+
+  function nextCopyStart(appointment: AppointmentWithDetails): string {
+    const duration = appointment.durationMin;
+    const start = minutesFromTime(settings?.workdayStart ?? '09:00');
+    const end = minutesFromTime(settings?.workdayEnd ?? '18:00');
+    const others = filtered.filter(
+      (item) =>
+        item.id !== appointment.id &&
+        item.date === appointment.date &&
+        item.specialistId === appointment.specialistId &&
+        item.status !== 'cancelled',
+    );
+    const isFree = (minute: number) => {
+      if (minute < start || minute + duration > end) return false;
+      return !others.some((item) => {
+        const otherStart = minutesFromTime(item.startTime);
+        const otherEnd = otherStart + item.durationMin;
+        return minute < otherEnd && minute + duration > otherStart;
+      });
+    };
+
+    const afterCurrent =
+      Math.ceil((minutesFromTime(appointment.startTime) + duration) / 15) * 15;
+    for (let minute = afterCurrent; minute + duration <= end; minute += 15) {
+      if (isFree(minute)) return timeFromMinutes(minute);
+    }
+    for (let minute = start; minute + duration <= end; minute += 15) {
+      if (isFree(minute)) return timeFromMinutes(minute);
+    }
+    return appointment.startTime;
+  }
+
+  function openCopy(appointment: AppointmentWithDetails) {
+    setContextMenu(null);
+    setEditingId(null);
+    setCopySource(appointment);
+    setDefaults({
+      date: appointment.date,
+      startTime: nextCopyStart(appointment),
+      specialistId: appointment.specialistId,
+    });
+    setEditorOpen(true);
+  }
+
+  async function moveAppointment(input: {
+    id: string;
+    date: string;
+    specialistId: string;
+    startTime: string;
+  }) {
+    try {
+      await updateAppointmentTiming(input);
+      toast({
+        title: 'Запись перенесена',
+        description: `${input.date.split('-').reverse().join('.')} в ${input.startTime}`,
+      });
+    } catch (cause) {
+      toast({
+        title: 'Не удалось перенести запись',
+        description:
+          cause instanceof Error ? cause.message : 'Попробуйте выбрать другое время',
+        tone: 'error',
+      });
+    }
+  }
+
+  async function resizeAppointment(input: { id: string; durationMin: number }) {
+    const appointment = (appointments ?? []).find((item) => item.id === input.id);
+    if (!appointment) return;
+    try {
+      await updateAppointmentTiming({
+        id: appointment.id,
+        date: appointment.date,
+        specialistId: appointment.specialistId,
+        startTime: appointment.startTime,
+        durationMin: input.durationMin,
+      });
+      toast({
+        title: 'Длительность обновлена',
+        description: `Фактическое время: ${formatDuration(input.durationMin)}`,
+      });
+    } catch (cause) {
+      toast({
+        title: 'Не удалось изменить длительность',
+        description:
+          cause instanceof Error ? cause.message : 'Попробуйте выбрать другое время',
+        tone: 'error',
+      });
+    }
+  }
+
+  async function moveAppointmentToDate(id: string, dateKey: string) {
+    const appointment = (appointments ?? []).find((item) => item.id === id);
+    if (!appointment || appointment.date === dateKey) {
+      setContextMenu(null);
+      return;
+    }
+    try {
+      await updateAppointmentTiming({
+        id,
+        date: dateKey,
+        specialistId: appointment.specialistId,
+        startTime: appointment.startTime,
+        durationMin: appointment.durationMin,
+      });
+      toast({
+        title: 'Запись перенесена',
+        description: `${dateKey.split('-').reverse().join('.')} в ${appointment.startTime}`,
+      });
+    } catch (cause) {
+      toast({
+        title: 'Не удалось перенести запись',
+        description:
+          cause instanceof Error ? cause.message : 'Попробуйте выбрать другой день',
+        tone: 'error',
+      });
+    }
+  }
+
+  async function changeStatus(status: AppointmentStatus) {
+    if (!contextMenu) return;
+    const appointment = contextMenu.appointment;
+    try {
+      await updateAppointmentStatus(appointment.id, status);
+      setContextMenu(null);
+      toast({
+        title: 'Статус изменён',
+        description: APPOINTMENT_STATUS_LABELS[status],
+      });
+    } catch (cause) {
+      toast({
+        title: 'Не удалось изменить статус',
+        description: cause instanceof Error ? cause.message : undefined,
+        tone: 'error',
+      });
+    }
+  }
+
+  async function removeAppointment() {
+    if (!contextMenu) return;
+    const appointment = contextMenu.appointment;
+    const clientName = appointment.client
+      ? `${appointment.client.firstName} ${appointment.client.lastName}`.trim()
+      : 'эту запись';
+    if (!window.confirm(`Удалить запись клиента ${clientName}? Это действие нельзя отменить.`)) {
+      return;
+    }
+    try {
+      await deleteAppointment(appointment.id);
+      setContextMenu(null);
+      toast({ title: 'Запись удалена', description: clientName });
+    } catch (cause) {
+      toast({
+        title: 'Не удалось удалить запись',
+        description: cause instanceof Error ? cause.message : undefined,
+        tone: 'error',
+      });
+    }
   }
 
   function openDay(dateKey: string) {
@@ -300,18 +479,26 @@ export function SchedulePage() {
           <CalendarDays size={13} className="text-primary" />
           <span className="font-semibold text-[#4E5C55]">{summaryText}</span>
         </div>
-        {view === 'month' && (
-          <span className="text-muted">Выберите день, чтобы открыть расписание</span>
-        )}
-        {specialistFilter !== 'all' && (
-          <button
-            type="button"
-            onClick={() => setSpecialistFilter('all')}
-            className="text-[10px] font-semibold text-primary hover:underline"
-          >
-            Сбросить фильтр
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {view === 'day' && (
+            <span className="inline-flex items-center gap-1.5 text-[10px] text-muted">
+              <MousePointer2 size={12} />
+              Перетащите запись · ПКМ — меню
+            </span>
+          )}
+          {view === 'month' && (
+            <span className="text-muted">Выберите день, чтобы открыть расписание</span>
+          )}
+          {specialistFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => setSpecialistFilter('all')}
+              className="text-[10px] font-semibold text-primary hover:underline"
+            >
+              Сбросить фильтр
+            </button>
+          )}
+        </div>
       </div>
 
       {view === 'day' && (
@@ -325,6 +512,11 @@ export function SchedulePage() {
             openCreate({ dateKey: dayKey, startTime, specialistId })
           }
           onOpen={openAppointment}
+          onMove={moveAppointment}
+          onResize={resizeAppointment}
+          onContextMenu={(appointment, position) =>
+            setContextMenu({ appointment, ...position })
+          }
         />
       )}
 
@@ -336,6 +528,10 @@ export function SchedulePage() {
           onOpenDay={openDay}
           onOpenAppointment={openAppointment}
           onCreate={(dateKey) => openCreate({ dateKey })}
+          onMoveToDate={moveAppointmentToDate}
+          onContextMenu={(appointment, position) =>
+            setContextMenu({ appointment, ...position })
+          }
         />
       )}
 
@@ -351,9 +547,30 @@ export function SchedulePage() {
 
       <AppointmentEditor
         open={editorOpen}
-        onOpenChange={setEditorOpen}
+        onOpenChange={(next) => {
+          setEditorOpen(next);
+          if (!next) setCopySource(null);
+        }}
         appointmentId={editingId}
+        copyFrom={copySource}
         defaults={defaults}
+      />
+
+      <AppointmentContextMenu
+        appointment={contextMenu?.appointment ?? null}
+        position={contextMenu ? { x: contextMenu.x, y: contextMenu.y } : null}
+        onClose={() => setContextMenu(null)}
+        onEdit={() => {
+          if (!contextMenu) return;
+          const id = contextMenu.appointment.id;
+          setContextMenu(null);
+          openAppointment(id);
+        }}
+        onCopy={() => {
+          if (contextMenu) openCopy(contextMenu.appointment);
+        }}
+        onDelete={removeAppointment}
+        onStatusChange={changeStatus}
       />
     </div>
   );

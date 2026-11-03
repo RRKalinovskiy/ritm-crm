@@ -689,7 +689,11 @@ export async function saveAppointment(input: AppointmentInput): Promise<string> 
   if (input.services.length === 0) {
     throw new Error('Добавьте хотя бы одну услугу');
   }
-  const durationMin = input.services.reduce((sum, line) => sum + line.durationMin, 0);
+  const servicesDuration = input.services.reduce((sum, line) => sum + line.durationMin, 0);
+  const durationMin =
+    input.durationMin != null && Number.isFinite(input.durationMin) && input.durationMin > 0
+      ? Math.round(input.durationMin)
+      : servicesDuration;
   const totalRub = input.services.reduce((sum, line) => sum + line.priceRub, 0);
 
   const conflict = await findConflictingAppointment({
@@ -741,6 +745,55 @@ export async function saveAppointment(input: AppointmentInput): Promise<string> 
   });
 
   return appointmentId;
+}
+
+/**
+ * Меняет время, специалиста или фактическую длительность записи.
+ * Используется при перетаскивании и изменении размера карточки в календаре.
+ */
+export async function updateAppointmentTiming(input: {
+  id: string;
+  date: string;
+  specialistId: string;
+  startTime: string;
+  durationMin?: number;
+}): Promise<void> {
+  const existing = await db.appointments.get(input.id);
+  if (!existing) throw new Error('Запись не найдена');
+
+  const durationMin =
+    input.durationMin != null ? Math.round(input.durationMin) : existing.durationMin;
+  if (!Number.isFinite(durationMin) || durationMin <= 0) {
+    throw new Error('Длительность должна быть больше нуля');
+  }
+
+  const conflict = await findConflictingAppointment({
+    id: input.id,
+    date: input.date,
+    specialistId: input.specialistId,
+    startTime: input.startTime,
+    durationMin,
+  });
+  if (conflict) {
+    throw new Error(
+      `У специалиста уже есть запись в ${conflict.startTime}. Выберите другое время.`,
+    );
+  }
+
+  await db.appointments.update(input.id, {
+    date: input.date,
+    specialistId: input.specialistId,
+    startTime: input.startTime,
+    durationMin,
+    updatedAt: nowIso(),
+  });
+}
+
+export async function deleteAppointment(id: string): Promise<void> {
+  await db.transaction('rw', [db.appointments, db.appointmentServices], async () => {
+    await db.appointmentServices.where('appointmentId').equals(id).delete();
+    await db.appointments.delete(id);
+  });
 }
 
 export async function updateAppointmentStatus(

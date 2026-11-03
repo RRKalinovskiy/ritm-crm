@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Check,
-  Clock3,
   Plus,
   Search,
   UserPlus,
@@ -31,6 +30,7 @@ import type {
   Appointment,
   AppointmentLineInput,
   AppointmentStatus,
+  AppointmentWithDetails,
   Category,
   Client,
   Service,
@@ -53,6 +53,7 @@ interface AppointmentEditorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appointmentId?: string | null;
+  copyFrom?: AppointmentWithDetails | null;
   defaults?: {
     date?: string;
     startTime?: string;
@@ -74,6 +75,7 @@ export function AppointmentEditor({
   open,
   onOpenChange,
   appointmentId,
+  copyFrom,
   defaults,
   onSaved,
 }: AppointmentEditorProps) {
@@ -94,6 +96,8 @@ export function AppointmentEditor({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [durationText, setDurationText] = useState('');
+  const [durationTouched, setDurationTouched] = useState(false);
 
   const [quickClientOpen, setQuickClientOpen] = useState(false);
   const [quickName, setQuickName] = useState('');
@@ -147,6 +151,8 @@ export function AppointmentEditor({
       setQuickServicePrice('');
       setQuickServiceDuration(60);
       setQuickServiceError('');
+      setDurationText('');
+      setDurationTouched(false);
 
       if (details) {
         setExisting(details);
@@ -171,6 +177,35 @@ export function AppointmentEditor({
         setClientQuery(
           details.client ? `${details.client.firstName} ${details.client.lastName}` : '',
         );
+        const planned = details.services.reduce((sum, line) => sum + line.durationMin, 0);
+        setDurationText(String(details.durationMin));
+        setDurationTouched(details.durationMin !== planned);
+      } else if (copyFrom) {
+        setExisting(null);
+        const planned = copyFrom.services.reduce((sum, line) => sum + line.durationMin, 0);
+        setForm({
+          clientId: copyFrom.clientId,
+          specialistId: copyFrom.specialistId,
+          date: defaults?.date ?? copyFrom.date,
+          startTime: defaults?.startTime ?? copyFrom.startTime,
+          status: 'pending',
+          comment: copyFrom.comment ?? '',
+        });
+        setSelected(
+          copyFrom.services.map((line) => ({
+            serviceId: line.serviceId,
+            nameSnapshot: line.nameSnapshot,
+            priceRub: line.priceRub,
+            costRub: line.costRub,
+            durationMin: line.durationMin,
+          })),
+        );
+        setServicePickerOpen(copyFrom.services.length === 0);
+        setClientQuery(
+          copyFrom.client ? `${copyFrom.client.firstName} ${copyFrom.client.lastName}` : '',
+        );
+        setDurationText(String(copyFrom.durationMin));
+        setDurationTouched(copyFrom.durationMin !== planned);
       } else {
         setExisting(null);
         setSelected([]);
@@ -187,7 +222,7 @@ export function AppointmentEditor({
     return () => {
       cancelled = true;
     };
-  }, [open, appointmentId, defaults?.date, defaults?.startTime, defaults?.specialistId]);
+  }, [open, appointmentId, copyFrom, defaults?.date, defaults?.startTime, defaults?.specialistId]);
 
   const selectedClient = clients.find((client) => client.id === form.clientId);
 
@@ -207,7 +242,18 @@ export function AppointmentEditor({
   }, [qualifiedSpecialists, form.specialistId, open]);
 
   const total = selected.reduce((sum, line) => sum + line.priceRub, 0);
-  const duration = selected.reduce((sum, line) => sum + line.durationMin, 0);
+  const plannedDuration = selected.reduce((sum, line) => sum + line.durationMin, 0);
+  const parsedDuration = Number(durationText);
+  const effectiveDuration =
+    Number.isFinite(parsedDuration) && parsedDuration > 0
+      ? Math.round(parsedDuration)
+      : plannedDuration;
+  const hasDurationOverride = effectiveDuration !== plannedDuration;
+
+  useEffect(() => {
+    if (!open || durationTouched) return;
+    setDurationText(plannedDuration > 0 ? String(plannedDuration) : '');
+  }, [open, plannedDuration, durationTouched]);
 
   useEffect(() => {
     if (!open || !form.specialistId || !form.date || !form.startTime) {
@@ -222,7 +268,7 @@ export function AppointmentEditor({
           date: form.date,
           specialistId: form.specialistId,
           startTime: form.startTime,
-          durationMin: Math.max(duration, 1),
+          durationMin: Math.max(effectiveDuration, 1),
         });
         if (active) setConflict(found ?? null);
       } catch {
@@ -233,7 +279,7 @@ export function AppointmentEditor({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, appointmentId, form.specialistId, form.date, form.startTime, duration]);
+  }, [open, appointmentId, form.specialistId, form.date, form.startTime, effectiveDuration]);
 
   const timeOptions = useMemo(() => {
     const start = Math.min(minutesFromTime(workday.start), minutesFromTime(form.startTime));
@@ -492,13 +538,16 @@ export function AppointmentEditor({
     if (!form.date) next.date = 'Укажите дату';
     if (!form.startTime) next.time = 'Укажите время';
     if (selected.length === 0) next.services = 'Добавьте хотя бы одну услугу';
+    if (!durationText.trim() || !Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+      next.duration = 'Укажите длительность больше нуля';
+    }
     if (form.startTime && minutesFromTime(form.startTime) < minutesFromTime(workday.start)) {
       next.time = `Рабочий день начинается в ${workday.start}`;
     }
     if (
       form.startTime &&
-      minutesFromTime(form.startTime) + duration > minutesFromTime(workday.end) &&
-      duration > 0
+      minutesFromTime(form.startTime) + effectiveDuration > minutesFromTime(workday.end) &&
+      effectiveDuration > 0
     ) {
       next.time = `Запись выходит за пределы рабочего дня (до ${workday.end})`;
     }
@@ -519,6 +568,7 @@ export function AppointmentEditor({
         startTime: form.startTime,
         status: form.status,
         comment: form.comment.trim() || undefined,
+        durationMin: effectiveDuration,
         services: selected,
       });
       toast({
@@ -558,15 +608,19 @@ export function AppointmentEditor({
     }
   }
 
+  const isCopy = Boolean(copyFrom && !appointmentId);
+
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title={existing ? 'Редактирование записи' : 'Новая запись'}
+      title={existing ? 'Редактирование записи' : isCopy ? 'Копия записи' : 'Новая запись'}
       description={
         existing
           ? `${formatRuDateShort(form.date)} · ${selectedClient ? `${selectedClient.firstName} ${selectedClient.lastName}` : 'Клиент не выбран'}`
-          : 'Заполните данные — запись сохранится в локальной базе'
+          : isCopy
+            ? 'Проверьте дату и время — копия ещё не сохранена'
+            : 'Заполните данные — запись сохранится в локальной базе'
       }
       size="lg"
       footer={
@@ -583,7 +637,7 @@ export function AppointmentEditor({
               Закрыть
             </Button>
             <Button onClick={handleSave} disabled={saving || Boolean(conflict)}>
-              {saving ? 'Сохраняем…' : existing ? 'Сохранить изменения' : 'Создать запись'}
+              {saving ? 'Сохраняем…' : existing ? 'Сохранить изменения' : isCopy ? 'Создать копию' : 'Создать запись'}
             </Button>
           </div>
         </>
@@ -721,12 +775,14 @@ export function AppointmentEditor({
               type="date"
               value={form.date}
               onChange={(event) => update('date', event.target.value)}
+              aria-label="Дата записи"
             />
           </Field>
           <Field label="Время" required error={errors.time}>
             <Select
               value={form.startTime}
               onChange={(event) => update('startTime', event.target.value)}
+              aria-label="Время записи"
             >
               {timeOptions.map((time) => (
                 <option key={time} value={time}>
@@ -735,11 +791,51 @@ export function AppointmentEditor({
               ))}
             </Select>
           </Field>
-          <Field label="Длительность" hint="Сумма длительностей услуг">
-            <div className="flex h-10 items-center gap-2 rounded-xl border border-line bg-[#F6F7F8] px-3 text-[13px] text-[#4E5C55]">
-              <Clock3 size={14} className="text-muted" />
-              {duration > 0 ? formatDuration(duration) : '—'}
+          <Field
+            label="Длительность"
+            required
+            error={errors.duration}
+            hint={
+              hasDurationOverride
+                ? undefined
+                : 'Можно изменить по факту. Шаг 15 минут.'
+            }
+          >
+            <div className="relative">
+              <Input
+                type="number"
+                min={15}
+                step={15}
+                value={durationText}
+                onChange={(event) => {
+                  setDurationText(event.target.value);
+                  setDurationTouched(true);
+                  setErrors((current) => {
+                    if (!current.duration) return current;
+                    const next = { ...current };
+                    delete next.duration;
+                    return next;
+                  });
+                }}
+                aria-label="Длительность записи"
+                className="pr-12"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted">
+                мин
+              </span>
             </div>
+            {hasDurationOverride && plannedDuration > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDurationTouched(false);
+                  setDurationText(String(plannedDuration));
+                }}
+                className="self-start text-[10px] font-semibold text-primary hover:underline"
+              >
+                Вернуть плановую {formatDuration(plannedDuration)}
+              </button>
+            )}
           </Field>
         </div>
 
@@ -748,6 +844,7 @@ export function AppointmentEditor({
             <Select
               value={form.specialistId}
               onChange={(event) => update('specialistId', event.target.value)}
+              aria-label="Специалист записи"
             >
               {qualifiedSpecialists.length === 0 && <option value="">Нет подходящего специалиста</option>}
               {qualifiedSpecialists.map((specialist) => (
@@ -761,6 +858,7 @@ export function AppointmentEditor({
             <Select
               value={form.status}
               onChange={(event) => update('status', event.target.value as AppointmentStatus)}
+              aria-label="Статус записи"
             >
               {APPOINTMENT_STATUS_ORDER.map((status) => (
                 <option key={status} value={status}>
@@ -1004,7 +1102,7 @@ export function AppointmentEditor({
             <div className="flex items-center justify-between border-t border-line bg-[#FBFCFB] px-3 py-2.5">
               <div className="text-[11px] text-muted">
                 {selected.length > 0
-                  ? `${selected.length} услуг · ${formatDuration(duration)} · до ${addMinutesToTime(form.startTime, duration)}`
+                  ? `${selected.length} услуг · ${formatDuration(effectiveDuration)} · до ${addMinutesToTime(form.startTime, effectiveDuration)}`
                   : 'Ничего не выбрано'}
               </div>
               <div className="text-right">

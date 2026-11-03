@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { AppointmentWithDetails } from '@/domain/types';
 import { STATUS_TONE } from '@/domain/types';
@@ -19,6 +19,11 @@ interface MonthViewProps {
   onOpenDay: (dateKey: string) => void;
   onOpenAppointment: (appointmentId: string) => void;
   onCreate: (dateKey: string) => void;
+  onMoveToDate: (appointmentId: string, dateKey: string) => void;
+  onContextMenu: (
+    appointment: AppointmentWithDetails,
+    position: { x: number; y: number },
+  ) => void;
 }
 
 export function MonthView({
@@ -28,8 +33,12 @@ export function MonthView({
   onOpenDay,
   onOpenAppointment,
   onCreate,
+  onMoveToDate,
+  onContextMenu,
 }: MonthViewProps) {
   const weeks = useMemo(() => getMonthMatrix(month), [month]);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const lastDropAtRef = useRef(0);
 
   const grouped = useMemo(() => {
     const map = new Map<string, AppointmentWithDetails[]>();
@@ -67,14 +76,34 @@ export function MonthView({
           return (
             <div
               key={key}
+              data-date-key={key}
               role="button"
               tabIndex={0}
-              onClick={() => onOpenDay(key)}
+              onClick={() => {
+                if (Date.now() - lastDropAtRef.current < 250) return;
+                onOpenDay(key);
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onOpenDay(key);
                 }
+              }}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes('text/ritm-appointment')) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                setDragOverKey(key);
+              }}
+              onDragLeave={() => setDragOverKey((current) => (current === key ? null : current))}
+              onDrop={(event) => {
+                event.preventDefault();
+                const appointmentId = event.dataTransfer.getData(
+                  'text/ritm-appointment',
+                );
+                setDragOverKey(null);
+                lastDropAtRef.current = Date.now();
+                if (appointmentId) onMoveToDate(appointmentId, key);
               }}
               className={cn(
                 'group relative min-h-[128px] cursor-pointer border-b border-r border-line p-2.5 text-left transition outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30',
@@ -82,6 +111,7 @@ export function MonthView({
                 inMonth && weekend && 'bg-[#FCFDFC]',
                 isCurrentDay && inMonth && 'bg-primary-faint hover:bg-primary-soft',
                 'hover:bg-primary-faint',
+                dragOverKey === key && 'bg-primary-soft ring-2 ring-inset ring-primary/40',
                 index >= weeks.length * 7 - 7 && 'border-b-0',
                 index % 7 === 6 && 'border-r-0',
               )}
@@ -125,11 +155,31 @@ export function MonthView({
                   <button
                     key={appointment.id}
                     type="button"
+                    data-appointment-id={appointment.id}
+                    draggable
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      event.dataTransfer.setData(
+                        'text/ritm-appointment',
+                        appointment.id,
+                      );
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => setDragOverKey(null)}
                     onClick={(event) => {
                       event.stopPropagation();
                       onOpenAppointment(appointment.id);
                     }}
-                    className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition hover:bg-white"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onContextMenu(appointment, {
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                    title="Перетащите на другой день. ПКМ — меню."
+                    className="flex min-w-0 cursor-grab items-center gap-1.5 rounded px-1 py-0.5 text-left transition hover:bg-white active:cursor-grabbing"
                   >
                     <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', STATUS_TONE[appointment.status].dot)} />
                     <span className="shrink-0 text-[9px] font-semibold tabular-nums text-[#69716D]">
@@ -154,7 +204,7 @@ export function MonthView({
       </div>
 
       <div className="flex items-center justify-between gap-3 bg-[#FBFCFB] px-4 py-2.5 text-[10px] text-muted">
-        <span>Нажмите на день, чтобы открыть расписание</span>
+        <span>Нажмите на день, чтобы открыть расписание · перетаскивайте записи между днями</span>
         <span className="flex items-center gap-3">
           {(['confirmed', 'pending', 'completed'] as const).map((status) => (
             <span key={status} className="inline-flex items-center gap-1.5">

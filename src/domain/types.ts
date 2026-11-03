@@ -113,6 +113,8 @@ export interface AppointmentInput {
   specialistId: string;
   date: string;
   startTime: string;
+  /** Фактическая длительность. Если не указана — сумма длительностей услуг. */
+  durationMin?: number;
   status: AppointmentStatus;
   comment?: string;
   services: AppointmentLineInput[];
