@@ -13,6 +13,11 @@ import type {
 } from '@/domain/types';
 import { nowIso, uid } from '@/lib/utils';
 import { minutesFromTime } from '@/domain/date';
+import {
+  lineDurationTotal,
+  linePriceTotal,
+  lineQuantity,
+} from '@/domain/appointmentLines';
 import { normalizePhone } from '@/domain/money';
 
 export async function getSettings(): Promise<Settings | undefined> {
@@ -689,12 +694,18 @@ export async function saveAppointment(input: AppointmentInput): Promise<string> 
   if (input.services.length === 0) {
     throw new Error('Добавьте хотя бы одну услугу');
   }
-  const servicesDuration = input.services.reduce((sum, line) => sum + line.durationMin, 0);
+  const servicesDuration = input.services.reduce(
+    (sum, line) => sum + lineDurationTotal(line),
+    0,
+  );
   const durationMin =
     input.durationMin != null && Number.isFinite(input.durationMin) && input.durationMin > 0
       ? Math.round(input.durationMin)
       : servicesDuration;
-  const totalRub = input.services.reduce((sum, line) => sum + line.priceRub, 0);
+  const totalRub = input.services.reduce(
+    (sum, line) => sum + linePriceTotal(line),
+    0,
+  );
 
   const conflict = await findConflictingAppointment({
     id: input.id,
@@ -740,6 +751,7 @@ export async function saveAppointment(input: AppointmentInput): Promise<string> 
         priceRub: line.priceRub,
         costRub: line.costRub,
         durationMin: line.durationMin,
+        quantity: lineQuantity(line),
       })),
     );
   });

@@ -97,6 +97,7 @@ export interface AppointmentService {
   priceRub: number;
   costRub?: number;
   durationMin: number;
+  quantity?: number;
 }
 
 export interface AppointmentLineInput {
@@ -105,6 +106,7 @@ export interface AppointmentLineInput {
   priceRub: number;
   costRub?: number;
   durationMin: number;
+  quantity?: number;
 }
 
 export interface AppointmentInput {

@@ -45,7 +45,12 @@ import {
   timeFromMinutes,
   toDateKey,
 } from '@/domain/date';
-import { formatPhone, formatRub, normalizePhone } from '@/domain/money';
+import {
+  lineDurationTotal,
+  linePriceTotal,
+  lineQuantity,
+} from '@/domain/appointmentLines';
+import { formatPhone, formatRub, normalizePhone, pluralize } from '@/domain/money';
 import { cn } from '@/lib/utils';
 import { SERVICE_DURATIONS, formatServiceDuration } from '@/features/services/durations';
 
@@ -171,18 +176,25 @@ export function AppointmentEditor({
             priceRub: line.priceRub,
             costRub: line.costRub,
             durationMin: line.durationMin,
+            quantity: line.quantity ?? 1,
           })),
         );
         setServicePickerOpen(details.services.length === 0);
         setClientQuery(
           details.client ? `${details.client.firstName} ${details.client.lastName}` : '',
         );
-        const planned = details.services.reduce((sum, line) => sum + line.durationMin, 0);
+        const planned = details.services.reduce(
+          (sum, line) => sum + lineDurationTotal(line),
+          0,
+        );
         setDurationText(String(details.durationMin));
         setDurationTouched(details.durationMin !== planned);
       } else if (copyFrom) {
         setExisting(null);
-        const planned = copyFrom.services.reduce((sum, line) => sum + line.durationMin, 0);
+        const planned = copyFrom.services.reduce(
+          (sum, line) => sum + lineDurationTotal(line),
+          0,
+        );
         setForm({
           clientId: copyFrom.clientId,
           specialistId: copyFrom.specialistId,
@@ -198,6 +210,7 @@ export function AppointmentEditor({
             priceRub: line.priceRub,
             costRub: line.costRub,
             durationMin: line.durationMin,
+            quantity: line.quantity ?? 1,
           })),
         );
         setServicePickerOpen(copyFrom.services.length === 0);
@@ -241,11 +254,19 @@ export function AppointmentEditor({
     }
   }, [qualifiedSpecialists, form.specialistId, open]);
 
-  const total = selected.reduce((sum, line) => sum + line.priceRub, 0);
-  const plannedDuration = selected.reduce((sum, line) => sum + line.durationMin, 0);
+  const total = selected.reduce((sum, line) => sum + linePriceTotal(line), 0);
+  const plannedDuration = selected.reduce(
+    (sum, line) => sum + lineDurationTotal(line),
+    0,
+  );
+  const totalUnits = selected.reduce((sum, line) => sum + lineQuantity(line), 0);
   const parsedDuration = Number(durationText);
+  const durationInputValid =
+    durationText.trim().length > 0 &&
+    Number.isFinite(parsedDuration) &&
+    parsedDuration > 0;
   const effectiveDuration =
-    Number.isFinite(parsedDuration) && parsedDuration > 0
+    durationTouched && durationInputValid
       ? Math.round(parsedDuration)
       : plannedDuration;
   const hasDurationOverride = effectiveDuration !== plannedDuration;
@@ -361,6 +382,7 @@ export function AppointmentEditor({
           priceRub: service.priceRub,
           costRub: service.costRub,
           durationMin: service.durationMin,
+          quantity: 1,
         },
       ];
     });
@@ -374,6 +396,17 @@ export function AppointmentEditor({
 
   function removeService(serviceId: string) {
     setSelected((current) => current.filter((line) => line.serviceId !== serviceId));
+  }
+
+  function updateQuantity(serviceId: string, quantity: number) {
+    const nextQuantity = Math.max(1, Math.min(999, Math.round(quantity)));
+    setSelected((current) =>
+      current.map((line) =>
+        line.serviceId === serviceId
+          ? { ...line, quantity: nextQuantity }
+          : line,
+      ),
+    );
   }
 
   async function createQuickClient() {
@@ -498,6 +531,7 @@ export function AppointmentEditor({
                 nameSnapshot: name,
                 priceRub: roundedPrice,
                 durationMin: quickServiceDuration,
+                quantity: 1,
               },
             ],
       );
@@ -538,7 +572,7 @@ export function AppointmentEditor({
     if (!form.date) next.date = 'Укажите дату';
     if (!form.startTime) next.time = 'Укажите время';
     if (selected.length === 0) next.services = 'Добавьте хотя бы одну услугу';
-    if (!durationText.trim() || !Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+    if (durationTouched && (!durationInputValid || parsedDuration <= 0)) {
       next.duration = 'Укажите длительность больше нуля';
     }
     if (form.startTime && minutesFromTime(form.startTime) < minutesFromTime(workday.start)) {
@@ -880,35 +914,92 @@ export function AppointmentEditor({
           </div>
         )}
 
-        <Field label="Услуги" required error={errors.services}>
+        <Field
+          label="Услуги"
+          required
+          error={errors.services}
+          hint="Количество умножает цену и время услуги."
+        >
           <div className="rounded-xl border border-line">
             {selected.length > 0 && (
               <div className="border-b border-line">
-                {selected.map((line) => (
-                  <div
-                    key={line.serviceId}
-                    className="flex items-center gap-3 border-b border-line/60 px-3 py-2.5 last:border-b-0"
-                  >
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white">
-                      <Check size={11} strokeWidth={3} />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-ink">
-                      {line.nameSnapshot}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-muted">{line.durationMin} мин</span>
-                    <span className="w-[74px] shrink-0 text-right text-[11px] font-bold tabular-nums text-ink">
-                      {formatRub(line.priceRub)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeService(line.serviceId)}
-                      className="rounded-md p-1 text-muted transition hover:bg-[#F1F4F2] hover:text-danger"
-                      aria-label={`Убрать услугу ${line.nameSnapshot}`}
+                {selected.map((line) => {
+                  const quantity = lineQuantity(line);
+                  const lineDuration = lineDurationTotal(line);
+                  const linePrice = linePriceTotal(line);
+                  return (
+                    <div
+                      key={line.serviceId}
+                      className="flex items-center gap-2 border-b border-line/60 px-3 py-2.5 last:border-b-0"
                     >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-white">
+                        <Check size={11} strokeWidth={3} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-semibold text-ink">
+                          {line.nameSnapshot}
+                        </div>
+                        {quantity > 1 && (
+                          <div className="mt-0.5 text-[9px] text-muted">
+                            {formatRub(line.priceRub)} × {quantity}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(line.serviceId, quantity - 1)}
+                          disabled={quantity <= 1}
+                          className="flex h-6 w-6 items-center justify-center rounded text-[13px] font-bold text-muted transition hover:bg-[#F1F4F2] hover:text-ink disabled:cursor-not-allowed disabled:opacity-30"
+                          aria-label={`Уменьшить количество услуги ${line.nameSnapshot}`}
+                        >
+                          −
+                        </button>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={999}
+                          step={1}
+                          value={quantity}
+                          onFocus={(event) => event.currentTarget.select()}
+                          onChange={(event) =>
+                            updateQuantity(
+                              line.serviceId,
+                              Number(event.target.value) || 1,
+                            )
+                          }
+                          className="h-6 w-10 border-0 bg-transparent p-0 text-center text-[11px] font-bold [appearance:textfield] focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          aria-label={`Количество услуги ${line.nameSnapshot}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(line.serviceId, quantity + 1)}
+                          className="flex h-6 w-6 items-center justify-center rounded text-[13px] font-bold text-muted transition hover:bg-[#F1F4F2] hover:text-ink"
+                          aria-label={`Увеличить количество услуги ${line.nameSnapshot}`}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span
+                        className="w-[62px] shrink-0 text-right text-[10px] text-muted"
+                        title={`${line.durationMin} мин × ${quantity}`}
+                      >
+                        {formatDuration(lineDuration)}
+                      </span>
+                      <span className="w-[82px] shrink-0 text-right text-[11px] font-bold tabular-nums text-ink">
+                        {formatRub(linePrice)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeService(line.serviceId)}
+                        className="rounded-md p-1 text-muted transition hover:bg-[#F1F4F2] hover:text-danger"
+                        aria-label={`Убрать услугу ${line.nameSnapshot}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -935,16 +1026,7 @@ export function AppointmentEditor({
               )}
             </div>
 
-            {!servicePickerOpen && selected.length > 0 && !serviceQuery ? (
-              <button
-                type="button"
-                onClick={() => setServicePickerOpen(true)}
-                className="flex w-full items-center justify-center gap-1.5 px-3 py-2.5 text-[10px] font-semibold text-muted transition hover:bg-primary-faint hover:text-primary"
-              >
-                <Plus size={12} />
-                Добавить ещё услугу
-              </button>
-            ) : (
+            {(servicePickerOpen || Boolean(serviceQuery)) && (
               <div className="max-h-[190px] overflow-y-auto p-1.5">
                 {filteredServices.map(({ category, items }) => (
                   <div key={category.id}>
@@ -1102,7 +1184,7 @@ export function AppointmentEditor({
             <div className="flex items-center justify-between border-t border-line bg-[#FBFCFB] px-3 py-2.5">
               <div className="text-[11px] text-muted">
                 {selected.length > 0
-                  ? `${selected.length} услуг · ${formatDuration(effectiveDuration)} · до ${addMinutesToTime(form.startTime, effectiveDuration)}`
+                  ? `${selected.length} ${pluralize(selected.length, 'услуга', 'услуги', 'услуг')}${totalUnits > selected.length ? ` · ${totalUnits} ед.` : ''} · ${formatDuration(effectiveDuration)} · до ${addMinutesToTime(form.startTime, effectiveDuration)}`
                   : 'Ничего не выбрано'}
               </div>
               <div className="text-right">

@@ -16,6 +16,7 @@ import {
   timeFromMinutes,
 } from '@/domain/date';
 import { formatRub, pluralize } from '@/domain/money';
+import { lineQuantity } from '@/domain/appointmentLines';
 import { cn } from '@/lib/utils';
 
 const PX_PER_MINUTE = 1;
@@ -363,7 +364,12 @@ export function DayView({
                     const height = Math.max(displayDuration * PX_PER_MINUTE - 4, 34);
                     const tone = STATUS_TONE[appointment.status];
                     const services = appointment.services
-                      .map((line) => line.nameSnapshot)
+                      .map((line) => {
+                        const quantity = lineQuantity(line);
+                        return quantity > 1
+                          ? `${line.nameSnapshot} ×${quantity}`
+                          : line.nameSnapshot;
+                      })
                       .join(', ');
                     const clientName = appointment.client
                       ? `${appointment.client.firstName} ${appointment.client.lastName}`.trim()

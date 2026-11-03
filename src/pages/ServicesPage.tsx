@@ -121,7 +121,7 @@ export function ServicesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Услуги"
-        subtitle="Единый прайс для записи клиентов и расчёта стоимости"
+        subtitle="Единый прайс для записи клиентов и расчёта стоимости · цены и время за единицу"
         actions={
           <>
             <Button variant="secondary" onClick={() => setImportOpen(true)}>

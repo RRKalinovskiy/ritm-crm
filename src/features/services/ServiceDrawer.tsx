@@ -230,6 +230,11 @@ export function ServiceDrawer({ open, onOpenChange, service, onSaved }: ServiceD
           </Field>
         </div>
 
+        <div className="rounded-lg bg-[#F6F7F8] px-3 py-2 text-[10px] leading-4 text-muted">
+          Цена и длительность указываются за одну единицу. Количество задаётся в карточке
+          записи — например, для услуги «Шипование».
+        </div>
+
         <Field
           label="Себестоимость"
           hint="Необязательно. Нужна для расчёта прибыли в статистике."

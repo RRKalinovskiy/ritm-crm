@@ -37,6 +37,11 @@ import {
   startOfMonth,
 } from '@/domain/date';
 import { formatPercent, formatRub, pluralize } from '@/domain/money';
+import {
+  lineCostTotal,
+  linePriceTotal,
+  lineQuantity,
+} from '@/domain/appointmentLines';
 import type { AppointmentWithDetails, Specialist } from '@/domain/types';
 import { cn } from '@/lib/utils';
 
@@ -162,8 +167,8 @@ export function StatisticsPage() {
           prices: [],
         };
         entry.visits += 1;
-        entry.revenue += line.priceRub;
-        entry.prices.push(line.priceRub);
+        entry.revenue += linePriceTotal(line);
+        entry.prices.push(linePriceTotal(line));
         map.set(line.serviceId, entry);
       }
     }
@@ -516,7 +521,7 @@ function appointmentRevenue(appointment: AppointmentWithDetails, serviceId: stri
   if (serviceId === 'all') return appointment.totalRub;
   return appointment.services
     .filter((line) => line.serviceId === serviceId)
-    .reduce((sum, line) => sum + line.priceRub, 0);
+    .reduce((sum, line) => sum + linePriceTotal(line), 0);
 }
 
 function computeMetrics(
@@ -535,18 +540,23 @@ function computeMetrics(
   for (const appointment of completed) {
     if (serviceId === 'all') {
       revenue += appointment.totalRub;
-      sold += appointment.services.length;
+      sold += appointment.services.reduce(
+        (sum, line) => sum + lineQuantity(line),
+        0,
+      );
       for (const line of appointment.services) {
-        if (line.costRub == null) costsKnown = false;
-        else cost += line.costRub;
+        const lineCost = lineCostTotal(line);
+        if (lineCost == null) costsKnown = false;
+        else cost += lineCost;
       }
     } else {
       for (const line of appointment.services) {
         if (line.serviceId !== serviceId) continue;
-        revenue += line.priceRub;
-        sold += 1;
-        if (line.costRub == null) costsKnown = false;
-        else cost += line.costRub;
+        revenue += linePriceTotal(line);
+        sold += lineQuantity(line);
+        const lineCost = lineCostTotal(line);
+        if (lineCost == null) costsKnown = false;
+        else cost += lineCost;
       }
     }
   }
