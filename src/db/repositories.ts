@@ -3,6 +3,7 @@ import type {
   Appointment,
   AppointmentInput,
   AppointmentWithDetails,
+  Category,
   Client,
   ClientWithMeta,
   Service,
@@ -109,6 +110,243 @@ export async function completeOnboarding(input: OnboardingInput): Promise<void> 
       await db.services.bulkPut(services);
     },
   );
+}
+
+export interface PriceImportServiceRow {
+  categoryName: string;
+  name: string;
+  priceRub: number;
+  durationMin: number;
+  costRub?: number;
+  description?: string;
+  specialistNames: string[];
+}
+
+export interface PriceImportOptions {
+  hasCostColumn: boolean;
+  hasDescriptionColumn: boolean;
+  hasSpecialistColumn: boolean;
+}
+
+export interface PriceImportResult {
+  totalRows: number;
+  createdServices: number;
+  updatedServices: number;
+  createdCategories: number;
+  createdSpecialists: number;
+}
+
+const IMPORT_SPECIALIST_COLORS = [
+  '#376451',
+  '#8A6D3B',
+  '#5E718A',
+  '#8A4F63',
+  '#5C6B3D',
+  '#7A5C8A',
+];
+
+function importLookup(value: string): string {
+  return value.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+}
+
+/**
+ * Импортирует прайс из Excel. Категории и специалисты создаются по имени,
+ * услуги с совпадающей категорией и названием обновляются.
+ */
+export async function importPriceList(
+  rows: PriceImportServiceRow[],
+  options: PriceImportOptions,
+): Promise<PriceImportResult> {
+  const prepared = rows.map((row) => ({
+    ...row,
+    categoryName: row.categoryName.trim(),
+    name: row.name.trim(),
+    description: row.description?.trim() || undefined,
+    specialistNames: row.specialistNames.map((name) => name.trim()).filter(Boolean),
+  }));
+
+  for (const row of prepared) {
+    if (!row.categoryName || !row.name) {
+      throw new Error('В импорте есть услуга без категории или названия');
+    }
+    if (!Number.isFinite(row.priceRub) || row.priceRub <= 0) {
+      throw new Error(`Укажите цену больше нуля для услуги «${row.name}»`);
+    }
+    if (!Number.isFinite(row.durationMin) || row.durationMin <= 0) {
+      throw new Error(`Укажите время для услуги «${row.name}»`);
+    }
+    if (row.costRub != null && (!Number.isFinite(row.costRub) || row.costRub < 0)) {
+      throw new Error(`Проверьте себестоимость услуги «${row.name}»`);
+    }
+  }
+
+  if (prepared.length === 0) {
+    throw new Error('Нет услуг для импорта');
+  }
+
+  const now = nowIso();
+
+  return db.transaction('rw', [db.categories, db.specialists, db.services], async () => {
+    const [existingCategories, existingSpecialists, existingServices] = await Promise.all([
+      db.categories.orderBy('order').toArray(),
+      db.specialists.toArray(),
+      db.services.toArray(),
+    ]);
+
+    const categories = [...existingCategories];
+    const specialists = [...existingSpecialists];
+    const servicesToPut = new Map<string, Service>();
+    const categoryByName = new Map<string, Category>();
+    const specialistByName = new Map<string, Specialist>();
+    const serviceByKey = new Map<string, Service>();
+    const createdCategories: Category[] = [];
+    const createdSpecialists: Specialist[] = [];
+
+    let nextCategoryOrder =
+      categories.reduce((max, category) => Math.max(max, category.order), 0) + 1;
+
+    for (const category of categories) {
+      categoryByName.set(importLookup(category.name), category);
+    }
+    for (const specialist of specialists) {
+      specialistByName.set(importLookup(specialist.name), specialist);
+    }
+    for (const service of existingServices) {
+      const key = `${service.categoryId}|${importLookup(service.name)}`;
+      if (!serviceByKey.has(key)) serviceByKey.set(key, service);
+    }
+
+    function ensureCategory(name: string): Category {
+      const key = importLookup(name);
+      const existing = categoryByName.get(key);
+      if (existing) return existing;
+      const category: Category = {
+        id: uid('cat'),
+        name,
+        order: nextCategoryOrder,
+      };
+      nextCategoryOrder += 1;
+      categories.push(category);
+      createdCategories.push(category);
+      categoryByName.set(key, category);
+      return category;
+    }
+
+    function ensureSpecialist(name: string): Specialist {
+      const key = importLookup(name);
+      const existing = specialistByName.get(key);
+      if (existing) return existing;
+      const specialist: Specialist = {
+        id: uid('sp'),
+        name,
+        role: 'Мастер',
+        color:
+          IMPORT_SPECIALIST_COLORS[specialists.length % IMPORT_SPECIALIST_COLORS.length],
+        active: true,
+        serviceIds: [],
+      };
+      specialists.push(specialist);
+      createdSpecialists.push(specialist);
+      specialistByName.set(key, specialist);
+      return specialist;
+    }
+
+    const uniqueRows = new Map<string, (typeof prepared)[number]>();
+    for (const row of prepared) {
+      const key = `${importLookup(row.categoryName)}|${importLookup(row.name)}`;
+      uniqueRows.delete(key);
+      uniqueRows.set(key, row);
+    }
+
+    let createdServices = 0;
+    let updatedServices = 0;
+
+    for (const row of uniqueRows.values()) {
+      const category = ensureCategory(row.categoryName);
+      const rowSpecialists = row.specialistNames.map(ensureSpecialist);
+      const specialistIds = rowSpecialists.map((specialist) => specialist.id);
+      const key = `${category.id}|${importLookup(row.name)}`;
+      const existing = serviceByKey.get(key);
+
+      if (existing) {
+        const next: Service = {
+          ...existing,
+          name: row.name,
+          categoryId: category.id,
+          priceRub: Math.round(row.priceRub),
+          durationMin: Math.round(row.durationMin),
+          costRub: options.hasCostColumn
+            ? row.costRub != null
+              ? Math.round(row.costRub)
+              : undefined
+            : existing.costRub,
+          description: options.hasDescriptionColumn
+            ? row.description
+            : existing.description,
+          specialistIds: options.hasSpecialistColumn
+            ? specialistIds
+            : existing.specialistIds,
+          updatedAt: now,
+        };
+        servicesToPut.set(next.id, next);
+        serviceByKey.set(key, next);
+        updatedServices += 1;
+      } else {
+        const next: Service = {
+          id: uid('svc'),
+          categoryId: category.id,
+          name: row.name,
+          durationMin: Math.round(row.durationMin),
+          priceRub: Math.round(row.priceRub),
+          ...(options.hasCostColumn && row.costRub != null
+            ? { costRub: Math.round(row.costRub) }
+            : {}),
+          ...(options.hasDescriptionColumn && row.description
+            ? { description: row.description }
+            : {}),
+          specialistIds: options.hasSpecialistColumn
+            ? specialistIds
+            : specialists
+                .filter((specialist) => specialist.active)
+                .map((specialist) => specialist.id),
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        servicesToPut.set(next.id, next);
+        serviceByKey.set(key, next);
+        createdServices += 1;
+      }
+    }
+
+    const finalServices = existingServices.map(
+      (service) => servicesToPut.get(service.id) ?? service,
+    );
+    for (const service of servicesToPut.values()) {
+      if (!existingServices.some((existing) => existing.id === service.id)) {
+        finalServices.push(service);
+      }
+    }
+
+    const finalSpecialists = specialists.map((specialist) => ({
+      ...specialist,
+      serviceIds: finalServices
+        .filter((service) => service.specialistIds.includes(specialist.id))
+        .map((service) => service.id),
+    }));
+
+    await db.categories.bulkPut(createdCategories);
+    await db.services.bulkPut([...servicesToPut.values()]);
+    await db.specialists.bulkPut(finalSpecialists);
+
+    return {
+      totalRows: uniqueRows.size,
+      createdServices,
+      updatedServices,
+      createdCategories: createdCategories.length,
+      createdSpecialists: createdSpecialists.length,
+    };
+  });
 }
 
 export async function listSpecialists(): Promise<Specialist[]> {

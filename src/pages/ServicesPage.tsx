@@ -11,6 +11,7 @@ import {
   Search,
   Sparkles,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,7 @@ import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { ServiceDrawer } from '@/features/services/ServiceDrawer';
+import { PriceImportModal } from '@/features/services/PriceImportModal';
 import {
   deleteService,
   listCategories,
@@ -48,6 +50,7 @@ export function ServicesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const list = services ?? [];
 
@@ -120,10 +123,16 @@ export function ServicesPage() {
         title="Услуги"
         subtitle="Единый прайс для записи клиентов и расчёта стоимости"
         actions={
-          <Button onClick={openCreate}>
-            <Plus size={16} />
-            Добавить услугу
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              <Upload size={16} />
+              Загрузить прайс
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus size={16} />
+              Добавить услугу
+            </Button>
+          </>
         }
       />
 
@@ -297,6 +306,15 @@ export function ServicesPage() {
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         service={editing}
+      />
+      <PriceImportModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={() => {
+          setActiveCategory('all');
+          setStatusFilter('all');
+          setQuery('');
+        }}
       />
     </div>
   );
